@@ -1,0 +1,432 @@
+\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs}
+\setlength{\parskip}{0.3em}
+\linespread{1.1}
+
+\begin{document}
+\pagestyle{plain}
+
+\begin{center}
+  {\Large\bfseries 第二次上机作业：四种 QR 分解方法的正交性比较}
+\end{center}
+
+\section{原题抄录}
+
+随机生成 10 个不同条件数的 $500\times20$ 阶矩阵，编程比较
+CGS、MGS、MGS2 和 Householder 变换进行 QR 分解后得到的
+$\|Q^{\mathrm T}Q-I\|_{\mathrm F}$，以衡量计算所得 $Q$ 的正交性。
+要求程序输出这 10 个矩阵分别使用四种方法得到的范数。
+
+本文按题目给定公式计算。严格地说，
+$\|Q^{\mathrm T}Q-I\|_{\mathrm F}$ 是正交性误差，未进行相对归一化；
+若定义相对误差，则还需除以 $\|I\|_{\mathrm F}=\sqrt{20}$。
+本实验不增加这一除法，以保持与所给程序一致。
+
+\section{代码的结构、算法说明}
+
+\subsection*{（1）矩阵与误差的记号}
+
+记待分解矩阵为
+\[
+A=[a_1,\ldots,a_n]\in\mathbb R^{m\times n},
+\qquad m=500,\quad n=20.
+\]
+对列满秩矩阵，薄 QR 分解写成
+\[
+A=QR,\qquad
+Q=[q_1,\ldots,q_n]\in\mathbb R^{m\times n},
+\qquad R=(r_{ij})\in\mathbb R^{n\times n},
+\]
+其中 $R$ 为上三角矩阵，精确算术下 $Q^{\mathrm T}Q=I_n$。
+程序使用双精度浮点数计算，所得 $Q$ 可能失去正交性。
+
+函数 \texttt{orthogonality\_error(Q)} 计算
+\[
+\eta(Q)=\|Q^{\mathrm T}Q-I_n\|_{\mathrm F}
+=\left(
+\sum_{i=1}^{n}\sum_{j=1}^{n}
+\bigl(q_i^{\mathrm T}q_j-\delta_{ij}\bigr)^2
+\right)^{1/2},
+\]
+其中 $\delta_{ij}$ 为 Kronecker 符号。
+$\eta(Q)$ 越小，表示所得列向量越接近标准正交向量组。
+它没有必须小于 1 的要求。
+
+\subsection*{（2）随机矩阵的生成}
+
+函数
+\texttt{generate\_matrix(m, n, condition\_number, rng)}
+先生成两个标准正态随机矩阵，再调用
+\texttt{numpy.linalg.qr}
+得到列正交矩阵 $U\in\mathbb R^{500\times20}$ 和正交矩阵
+$V\in\mathbb R^{20\times20}$。
+
+设目标条件数为 $\kappa$，取
+\[
+\sigma_i=\kappa^{-(i-1)/(n-1)},
+\qquad i=1,\ldots,n,
+\]
+并令
+\[
+\Sigma=\operatorname{diag}(\sigma_1,\ldots,\sigma_n),
+\qquad A=U\Sigma V^{\mathrm T}.
+\]
+精确算术下，$A$ 的奇异值为
+$\sigma_1,\ldots,\sigma_n$，因此
+\[
+\kappa_2(A)=\frac{\sigma_1}{\sigma_n}=\kappa.
+\]
+
+主程序使用 \texttt{numpy.logspace(1, 16, 10)}
+选取 10 个目标条件数，即
+\[
+\kappa_j=10^{1+15(j-1)/9},
+\qquad j=1,\ldots,10.
+\]
+固定随机种子为 2026，每次生成矩阵时使用新的随机数。
+程序还通过
+\texttt{numpy.linalg.}\allowbreak\texttt{cond(A)}
+计算实际二范数条件数，用于观察矩阵构造中的浮点舍入影响。
+
+这里调用库函数 QR 仅用于生成测试矩阵；
+下面参与比较的四种 QR 算法均由程序直接实现。
+对每个测试矩阵，四种算法使用相同输入，
+且各函数均不修改原始矩阵 $A$。
+
+\subsection*{（3）经典 Gram--Schmidt 方法：CGS}
+
+函数 \texttt{CGS(A)} 逐列计算 $Q,R$。
+处理第 $j$ 列时，先计算
+\[
+r_{ij}=q_i^{\mathrm T}a_j,
+\qquad i=1,\ldots,j-1,
+\]
+再减去全部投影：
+\[
+v=a_j-\sum_{i=1}^{j-1}r_{ij}q_i.
+\]
+最后令
+\[
+r_{jj}=\|v\|_2,
+\qquad q_j=\frac{v}{r_{jj}}.
+\]
+
+当 $j=1$ 时求和为空。
+代码先用一个循环计算全部投影系数，
+再用另一个循环减去投影；
+各系数始终由原始列 $a_j$ 计算。
+
+\subsection*{（4）改进 Gram--Schmidt 方法：MGS}
+
+函数 \texttt{MGS(A)} 处理第 $j$ 列时，
+先令 $v=a_j$，然后对 $i=1,\ldots,j-1$ 依次执行
+\[
+r_{ij}=q_i^{\mathrm T}v,
+\qquad
+v\leftarrow v-r_{ij}q_i.
+\]
+完成投影消去后令
+\[
+r_{jj}=\|v\|_2,
+\qquad q_j=\frac{v}{r_{jj}}.
+\]
+
+与 CGS 不同，每次计算内积时使用的是当前残差 $v$。
+两种方法在精确算术下等价，但浮点运算顺序不同，
+因而数值稳定性不同。
+
+\subsection*{（5）两遍重正交化方法：MGS2}
+
+函数 \texttt{MGS2(A)} 对每一列连续执行两遍
+MGS 投影消去，最后再归一化。
+
+处理第 $j$ 列时，先令
+\[
+v=a_j,\qquad r_{ij}=0\quad(i<j).
+\]
+对于遍数 $p=1,2$，
+每遍按 $i=1,\ldots,j-1$ 依次执行
+\[
+c_{ij}^{(p)}=q_i^{\mathrm T}v,
+\]
+\[
+v\leftarrow v-c_{ij}^{(p)}q_i,
+\qquad
+r_{ij}\leftarrow r_{ij}+c_{ij}^{(p)}.
+\]
+两遍结束后，令
+\[
+r_{jj}=\|v\|_2,
+\qquad q_j=\frac{v}{r_{jj}}.
+\]
+
+因此
+\[
+r_{ij}=c_{ij}^{(1)}+c_{ij}^{(2)}.
+\]
+第二遍用于消除第一遍因舍入误差而残留的投影；
+其系数需要累加到 $R$ 中，不能覆盖第一遍的结果。
+
+\subsection*{（6）Householder QR 方法}
+
+函数 \texttt{Householder(A)} 采用教材中的记号
+\[
+H=I-2\frac{vv^{\mathrm T}}{v^{\mathrm T}v},
+\qquad v\ne0.
+\]
+若 $\|x\|_2=\|y\|_2$ 且 $x\ne y$，
+取 $v=x-y$，则 $Hx=y$。
+
+令 $A_0=A$。第 $k$ 步取
+\[
+x=A_{k-1}(k:m,k)\in\mathbb R^{m-k+1},
+\qquad k=1,\ldots,n.
+\]
+定义
+\[
+\operatorname{sgn}_+(t)=
+\begin{cases}
+1,&t\ge0,\\
+-1,&t<0,
+\end{cases}
+\]
+并取
+\[
+y=-\operatorname{sgn}_+(x_1)\|x\|_2e_1,
+\qquad v=x-y,
+\]
+其中 $e_1\in\mathbb R^{m-k+1}$ 为第一个标准基向量。
+这一符号选择使 $v$ 的第一个分量由同号相加得到，
+避免相减消去。
+
+将局部反射向量 $v$ 补零为
+\[
+v_k=
+\begin{bmatrix}
+0_{k-1}\\v
+\end{bmatrix},
+\qquad
+H_k=I_m-2\frac{v_kv_k^{\mathrm T}}{v_k^{\mathrm T}v_k},
+\]
+并计算
+\[
+A_k=H_kA_{k-1},
+\]
+从而消去第 $k$ 列对角线以下的元素。
+
+程序不显式构造 $H_k$，
+只对当前右下角子矩阵 $B$ 执行
+\[
+B\leftarrow B-2\frac{v(v^{\mathrm T}B)}{v^{\mathrm T}v}.
+\]
+代码中的 \texttt{np.outer(v, v @ B)}
+对应 $v(v^{\mathrm T}B)$。
+每一步的局部向量 $v$
+保存到列表 \texttt{vectors} 中。
+
+完成全部反射后，理论上有
+\[
+A_n=H_n\cdots H_1A
+=
+\begin{bmatrix}
+R\\0_{(m-n)\times n}
+\end{bmatrix}.
+\]
+代码取前 $n$ 行，再用 \texttt{np.triu}
+清除下三角的舍入残留，得到 $R$。
+
+由 $H_k^{\mathrm T}=H_k^{-1}=H_k$，薄正交因子为
+\[
+Q=H_1H_2\cdots H_nE,
+\qquad
+E=
+\begin{bmatrix}
+I_n\\0_{(m-n)\times n}
+\end{bmatrix}.
+\]
+代码先用 \texttt{np.eye(m, n)} 初始化 $E$，
+再按 $n,n-1,\ldots,1$ 的顺序逐次左乘反射矩阵，
+得到上述乘积。
+
+数学下标从 1 开始，而 Python 下标从 0 开始。
+
+\subsection*{（7）主程序与输出}
+
+主程序对每个矩阵依次调用
+\texttt{CGS}、\texttt{MGS}、
+\texttt{MGS2} 和 \texttt{Householder}，
+各函数返回薄矩阵 $Q$ 和上三角矩阵 $R$。
+随后计算四个正交性误差，并以科学计数法输出。
+
+本次比较的指标仅为
+$\|Q^{\mathrm T}Q-I_n\|_{\mathrm F}$，
+不包含运行时间和分解残差
+$\|A-QR\|_{\mathrm F}/\|A\|_{\mathrm F}$。
+
+\section{输出结果呈现}
+
+以下为所给程序的一次实际运行结果，
+使用 Python 3.12、NumPy 2.3.5，
+并将 OpenBLAS 线程数设为 1。
+不同数值库、线程设置或平台可能改变舍入误差，
+因此固定随机种子并不保证跨平台输出逐位相同。
+
+为便于排版，将程序输出拆为两个表，
+以相同序号对应。条件数保留程序输出的小数位数。
+
+\begin{center}
+\small
+\begin{tabular}{crr}
+\toprule
+序号 & 目标条件数 & 实际条件数 $\kappa_2(A)$\\
+\midrule
+1  & \texttt{1.0000e+01} & \texttt{1.0000e+01}\\
+2  & \texttt{4.6416e+02} & \texttt{4.6416e+02}\\
+3  & \texttt{2.1544e+04} & \texttt{2.1544e+04}\\
+4  & \texttt{1.0000e+06} & \texttt{1.0000e+06}\\
+5  & \texttt{4.6416e+07} & \texttt{4.6416e+07}\\
+6  & \texttt{2.1544e+09} & \texttt{2.1544e+09}\\
+7  & \texttt{1.0000e+11} & \texttt{1.0000e+11}\\
+8  & \texttt{4.6416e+12} & \texttt{4.6416e+12}\\
+9  & \texttt{2.1544e+14} & \texttt{2.1519e+14}\\
+10 & \texttt{1.0000e+16} & \texttt{9.0691e+15}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+四种方法的正交性误差 $\eta(Q)$ 如下：
+
+\begin{center}
+\small
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{crrrr}
+\toprule
+序号 & CGS & MGS & MGS2 & Householder\\
+\midrule
+1
+& \texttt{3.478256e-15}
+& \texttt{2.705890e-15}
+& \texttt{1.065330e-15}
+& \texttt{2.310313e-15}\\
+2
+& \texttt{1.688335e-12}
+& \texttt{6.547062e-14}
+& \texttt{1.643985e-15}
+& \texttt{2.036919e-15}\\
+3
+& \texttt{6.940720e-09}
+& \texttt{1.581109e-12}
+& \texttt{1.141623e-15}
+& \texttt{1.947947e-15}\\
+4
+& \texttt{4.890503e-05}
+& \texttt{3.564626e-11}
+& \texttt{1.601224e-15}
+& \texttt{2.452404e-15}\\
+5
+& \texttt{2.190315e-02}
+& \texttt{3.412914e-09}
+& \texttt{1.487992e-15}
+& \texttt{2.168266e-15}\\
+6
+& \texttt{2.707436e+00}
+& \texttt{1.324775e-07}
+& \texttt{1.732023e-15}
+& \texttt{1.774602e-15}\\
+7
+& \texttt{6.767364e+00}
+& \texttt{4.111114e-06}
+& \texttt{1.465112e-15}
+& \texttt{2.293422e-15}\\
+8
+& \texttt{7.802343e+00}
+& \texttt{2.169458e-04}
+& \texttt{1.129266e-15}
+& \texttt{2.232910e-15}\\
+9
+& \texttt{8.400029e+00}
+& \texttt{6.831170e-03}
+& \texttt{1.573747e-15}
+& \texttt{2.303039e-15}\\
+10
+& \texttt{1.024099e+01}
+& \texttt{3.842240e-01}
+& \texttt{1.393481e-15}
+& \texttt{1.969044e-15}\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{对输出结果的分析和结论}
+
+\subsection*{（1）CGS 与 MGS 的比较}
+
+当条件数较小时，四种方法均能得到接近标准正交的列向量。
+随着本次测试矩阵条件数增大，
+CGS 的正交性误差增长明显。
+例如，条件数约为 $10^6$ 时，
+其误差约为 $4.89\times10^{-5}$；
+条件数约为 $2.15\times10^9$ 时，
+误差已超过 1，说明正交性严重丢失。
+
+MGS 的结果明显优于 CGS。
+例如，在上述两个矩阵上，MGS 的误差分别约为
+$3.56\times10^{-11}$ 和 $1.32\times10^{-7}$。
+这是因为 MGS 每次对更新后的残差进行投影，
+减轻了舍入误差的影响。
+
+但 MGS 也不能完全避免病态矩阵带来的正交性损失：
+最后一个矩阵的 MGS 误差约为 $3.84\times10^{-1}$。
+
+\subsection*{（2）MGS2 与 Householder 的表现}
+
+本次 10 个矩阵上，MGS2 的误差均约为 $10^{-15}$。
+第二遍投影消去有效去除了第一遍留下的非正交分量。
+Householder 的误差也始终约为 $10^{-15}$，
+表现出较好的正交性保持能力。
+这与它通过一系列正交反射构造 $Q$ 的特点一致。
+
+双精度浮点数的机器精度约为 $2.22\times10^{-16}$。
+本实验计算的是包含多个分量的 Frobenius 范数，
+误差还受到矩阵维数和运算累积影响，
+因此 $10^{-15}$ 量级与接近机器精度的正交性相符。
+
+本次数据中 MGS2 的误差略小于 Householder，
+但两者处于相同数量级，
+不能据此认定 MGS2 在所有矩阵上都优于 Householder。
+
+\subsection*{（3）实际条件数与实验范围}
+
+前几组矩阵的实际条件数与目标值在显示精度内一致。
+当目标条件数达到 $10^{16}$ 时，
+实际计算值约为 $9.07\times10^{15}$。
+此时预设最小奇异值为 $10^{-16}$，
+已接近双精度舍入误差尺度，
+构造矩阵和计算奇异值时的舍入都会影响实际条件数。
+因此，高条件数组应结合实际条件数解释，
+不能将目标值视为精确实现值。
+
+本实验每个目标条件数只取一个随机矩阵，
+结论反映这组样本的表现，
+并非对全部同条件数矩阵的统计结论。
+
+此外，正交性误差小不单独证明 $A\approx QR$；
+若要全面评价分解质量，
+还应另行检查相对分解残差。
+本次没有测量运行时间，
+因此不对四种方法的实际耗时作排序。
+
+\subsection*{（4）结论}
+
+对本次生成的 10 个测试矩阵，
+随着条件数增大，CGS 较早出现明显的正交性损失；
+MGS 有所改善，但在极高条件数下仍失去正交性。
+MGS2 和 Householder 在全部样本上均保持约
+$10^{-15}$ 量级的正交性误差。
+
+因此，在本次实验范围内，
+重正交化与 Householder 反射都能有效改善
+计算所得 $Q$ 的正交性。
+
+\end{document}
